@@ -1,11 +1,12 @@
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
 import math
 from pathlib import Path
 
 # Set the title and favicon that appear in the Browser's tab bar.
 st.set_page_config(
-    page_title='GDP dashboard',
+    page_title='Indonesia Food Price',
     page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
 )
 
@@ -20,63 +21,40 @@ def get_gdp_data():
     reading from an HTTP endpoint instead of a file, it's a good idea to set
     a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
     """
-
+    
     # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+    DATA_FILENAME = Path(__file__).parent/'data/indonesia_food_prices.csv'
+    df = pd.read_csv(DATA_FILENAME)
+    df = df.astype({'date':'datetime64[ns]'})
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+    print(df['date'].min())
+    MIN_YEAR = df['date'].min().year
+    MAX_YEAR = df['date'].max().year
+    
+    df['Year'] = df['date'].dt.year
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
+    return df
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
-
-    return gdp_df
-
-gdp_df = get_gdp_data()
+df = get_gdp_data()
 
 # -----------------------------------------------------------------------------
 # Draw the actual page
 
 # Set the title that appears at the top of the page.
 '''
-# :earth_americas: GDP dashboard
+# :earth_americas: Indonesia Food Price
 
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
+The dataset of Indonesia food price is from [Global Food Prices](https://www.kaggle.com/datasets/adrianjuliusaluoch/global-food-prices). The dataset contains Countries, Commodities and Markets data, sourced from the World Food Programme Price Database.
+
+The World Food Programme Price Database covers foods such as maize, rice, beans, fish, and sugar for 98 countries and some 3000 markets. It is updated weekly but contains to a large extent monthly data.
 '''
 
 # Add some spacing
 ''
 ''
 
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
+min_value = df['Year'].min()
+max_value = df['Year'].max()
 
 from_year, to_year = st.slider(
     'Which years are you interested in?',
@@ -84,58 +62,84 @@ from_year, to_year = st.slider(
     max_value=max_value,
     value=[min_value, max_value])
 
-countries = gdp_df['Country Code'].unique()
+target_column_name = "category"
+target_column_uniques = df[target_column_name].unique()
 
-if not len(countries):
-    st.warning("Select at least one country")
+if not len(target_column_uniques):
+    st.warning("Select at least one "+target_column_uniques)
 
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
+selected_uniques = st.multiselect(
+    'Which ' + target_column_name + ' would you like to view?',
+    target_column_uniques,
+    target_column_uniques)
 
 ''
 ''
 ''
 
 # Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
+filtered_df = df[
+    (df[target_column_name].isin(selected_uniques)) & 
+    (df['Year'] <= to_year) & 
+    (from_year <= df['Year'])
+].groupby(["date", target_column_name])[['price_usd','local_price']].mean()
+filtered_df = filtered_df.reset_index()
 
-st.header('GDP over time', divider='gray')
+st.header('USD Price change over time', divider='gray')
 
-''
+# ''
 
 st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
+    filtered_df,
+    x='date',
+    y='price_usd',
+    y_label='USD',
+    color=target_column_name
 )
 
 ''
 ''
+''
+
+st.header('IDR Price change over time', divider='gray')
+
+# ''
+
+st.line_chart(
+    filtered_df,
+    x='date',
+    y='local_price',
+    y_label='IDR',
+    color=target_column_name
+)
 
 
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
+''
+''
 
-st.header(f'GDP in {to_year}', divider='gray')
+filtered_df = df[
+    (df[target_column_name].isin(selected_uniques)) & 
+    (df['Year'] <= to_year) & 
+    (from_year <= df['Year'])
+].groupby(["Year", target_column_name])[['price_usd']].mean()
+filtered_df = filtered_df.reset_index()
+
+first_year = filtered_df[filtered_df['Year'] == from_year]
+last_year = filtered_df[filtered_df['Year'] == to_year]
+
+st.header(f'USD price change from {from_year} to {to_year}', divider='gray')
 
 ''
 
 cols = st.columns(4)
 
-for i, country in enumerate(selected_countries):
+for i, country in enumerate(selected_uniques):
     col = cols[i % len(cols)]
 
     with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
+        first_gdp = first_year[first_year[target_column_name] == country]['price_usd'].iat[0]
+        last_gdp = last_year[last_year[target_column_name] == country]['price_usd'].iat[0]
+    
         if math.isnan(first_gdp):
             growth = 'n/a'
             delta_color = 'off'
@@ -144,8 +148,8 @@ for i, country in enumerate(selected_countries):
             delta_color = 'normal'
 
         st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
+            label=f'{country}',
+            value=f'{last_gdp:,.2f}',
             delta=growth,
             delta_color=delta_color
         )
